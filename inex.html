@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Para la mujer de mi vida 💚</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            background: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        h1 {
+            margin-bottom: 15px;
+            font-size: 26px;
+            text-align: center;
+            color: #ff4757;
+            text-shadow: 0 0 10px rgba(255, 71, 87, 0.5);
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 35px rgba(255, 255, 255, 0.15);
+            background: #1e1e24;
+        }
+        canvas {
+            background: #1e1e24;
+            display: block;
+            border: 4px solid #333;
+            border-radius: 4px;
+        }
+        
+        /* Ajuste para estirar el juego correctamente en fullscreen */
+        canvas:fullscreen {
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain; 
+            background: #1e1e24;
+            border: none;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            pointer-events: none;
+            text-shadow: 2px 2px 0px #000;
+            z-index: 10;
+        }
+        #victory-screen {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            z-index: 20;
+        }
+        #victory-screen h2 {
+            color: #2ed573;
+            font-size: 46px;
+            margin-bottom: 20px;
+            animation: pulse 1s infinite alternate;
+            text-shadow: 0 0 15px rgba(46, 213, 115, 0.6);
+        }
+        @keyframes pulse {
+            from { transform: scale(1); }
+            to { transform: scale(1.05); }
+        }
+        .btn-fullscreen {
+            margin-top: 15px;
+            background: #2f3542;
+            color: #ffffff;
+            border: 2px solid #57606f;
+            padding: 12px 24px;
+            font-family: inherit;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        .btn-fullscreen:hover {
+            background: #ff4757;
+            border-color: #ff6b6b;
+            box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
+        }
+        .controls-hint {
+            margin-top: 12px;
+            font-size: 14px;
+            color: #888;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Un pequeño reto para ti <3</h1>
+    
+    <div id="game-container">
+        <canvas id="gameCanvas" width="1024" height="576"></canvas>
+        <div class="ui-layer">Intentos: <span id="death-count">0</span></div>
+        
+        <div id="victory-screen">
+            <h2>¡Has ganado un Vale para un libro!</h2>
+        </div>
+    </div>
+
+    <button class="btn-fullscreen" id="fullscreenBtn">🗖 PANTALLA COMPLETA</button>
+
+    <div class="controls-hint">
+        Controles: <strong>Flechas Izquierda / Derecha</strong> o <strong>A / D</strong> para moverse. 
+        <strong>Flecha Arriba / W / Espacio</strong> para saltar.
+    </div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const deathCountEl = document.getElementById("death-count");
+const victoryScreen = document.getElementById("victory-screen");
+const fullscreenBtn = document.getElementById("fullscreenBtn");
+
+let deaths = 0;
+let gameActive = true;
+let particles = [];
+let isDying = false;
+let respawnTimer = 0;
+let spawnAnimTimer = 0;
+
+// Configuración del jugador (Escalado proporcional al nuevo tamaño)
+const player = {
+    x: 38,
+    y: 448,
+    width: 26,
+    height: 26,
+    color: "#00d2d3",
+    vx: 0,
+    vy: 0,
+    speed: 5.76,
+    gravity: 0.448,
+    jumpForce: -10.5,
+    grounded: false
+};
+
+// Configuración de la Meta
+const goal = {
+    x: 960,
+    y: 141,
+    width: 32,
+    height: 32,
+    color: "#ff4757"
+};
+
+// Diseño del nivel (Coordenadas recalculadas para 1024x576)
+const platforms = [
+    { x: 0, y: 538, w: 192, h: 38 },    
+    { x: 269, y: 474, w: 64, h: 19 },   
+    { x: 397, y: 410, w: 45, h: 19 },   
+    { x: 269, y: 333, w: 51, h: 19 },   
+    { x: 115, y: 269, w: 77, h: 19 },    
+    { x: 282, y: 192, w: 38, h: 19 },   
+    { x: 410, y: 230, w: 102, h: 19 },   
+    { x: 589, y: 294, w: 64, h: 19 },   
+    { x: 730, y: 358, w: 51, h: 19 },   
+    { x: 858, y: 282, w: 51, h: 19 },   
+    { x: 947, y: 179, w: 77, h: 19 }    
+];
+
+// Diseño de los Pinchos (Recalculados proporcionalmente)
+const spikes = [
+    { x1: 192, y1: 538, x2: 218, y2: 538, x3: 205, y3: 512 },
+    { x1: 218, y1: 538, x2: 243, y2: 538, x3: 230, y3: 512 },
+    { x1: 448, y1: 576, x2: 832, y2: 576, x3: 640, y3: 486 }, 
+    { x1: 141, y1: 269, x2: 166, y2: 269, x3: 154, y3: 250 }, 
+    { x1: 435, y1: 230, x2: 461, y2: 230, x3: 448, y3: 211 }, 
+    { x1: 422, y1: 128, x2: 448, y2: 128, x3: 435, y3: 154 },
+    { x1: 448, y1: 128, x2: 474, y2: 128, x3: 461, y3: 154 },
+    { x1: 602, y1: 294, x2: 627, y2: 294, x3: 614, y3: 275 }, 
+    { x1: 736, y1: 358, x2: 762, y2: 358, x3: 749, y3: 339 }, 
+    { x1: 870, y1: 282, x2: 896, y2: 282, x3: 883, y3: 262 }  
+];
+
+// Input Handler
+const keys = {};
+window.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+fullscreenBtn.addEventListener("click", () => {
+    if (!document.fullscreenElement) {
+        canvas.requestFullscreen().catch(err => {
+            alert(`Error al intentar activar pantalla completa: ${err.message}`);
+        });
+    } else {
+        document.exitFullscreen();
+    }
+});
+
+function createExplosion(x, y) {
+    particles = [];
+    for (let i = 0; i < 25; i++) {
+        particles.push({
+            x: x + player.width / 2,
+            y: y + player.height / 2,
+            vx: (Math.random() - 0.5) * 8,
+            vy: (Math.random() - 0.5) * 8 - 3, 
+            size: Math.random() * 5 + 2,
+            color: player.color,
+            alpha: 1,
+            decay: Math.random() * 0.03 + 0.01
+        });
+    }
+}
+
+function triggerDeath() {
+    deaths++;
+    deathCountEl.innerText = deaths;
+    createExplosion(player.x, player.y);
+    isDying = true;
+    respawnTimer = 40; 
+}
+
+function resetPlayer() {
+    player.x = 38;
+    player.y = 448;
+    player.vx = 0;
+    player.vy = 0;
+    player.grounded = false;
+    isDying = false;
+    spawnAnimTimer = 30; 
+}
+
+function checkCollision(p, plat) {
+    return p.x < plat.x + plat.w &&
+           p.x + p.width > plat.x &&
+           p.y < plat.y + plat.h &&
+           p.y + p.height > plat.y;
+}
+
+function pointInTriangle(px, py, x1, y1, x2, y2, x3, y3) {
+    let areaOrig = Math.abs((x2-x1)*(y3-y1) - (x3-x1)*(y2-y1));
+    let area1 = Math.abs((x1-px)*(y2-py) - (x2-px)*(y1-py));
+    let area2 = Math.abs((x2-px)*(y3-py) - (x3-px)*(y2-py));
+    let area3 = Math.abs((x3-px)*(y1-py) - (x1-px)*(y3-py));
+    return Math.abs(areaOrig - (area1 + area2 + area3)) < 0.1;
+}
+
+function checkSpikeCollision(p, spike) {
+    return pointInTriangle(p.x, p.y, spike.x1, spike.y1, spike.x2, spike.y2, spike.x3, spike.y3) ||
+           pointInTriangle(p.x + p.width, p.y, spike.x1, spike.y1, spike.x2, spike.y2, spike.x3, spike.y3) ||
+           pointInTriangle(p.x, p.y + p.height, spike.x1, spike.y1, spike.x2, spike.y2, spike.x3, spike.y3) ||
+           pointInTriangle(p.x + p.width, p.y + p.height, spike.x1, spike.y1, spike.x2, spike.y2, spike.x3, spike.y3);
+}
+
+function update() {
+    if (!gameActive) return;
+
+    if (isDying) {
+        particles.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.2; 
+            p.alpha -= p.decay;
+        });
+        particles = particles.filter(p => p.alpha > 0);
+
+        respawnTimer--;
+        if (respawnTimer <= 0) {
+            resetPlayer();
+        }
+        return; 
+    }
+
+    if (spawnAnimTimer > 0) {
+        spawnAnimTimer--;
+    }
+
+    if (keys["arrowleft"] || keys["a"]) {
+        player.vx = -player.speed;
+    } else if (keys["arrowright"] || keys["d"]) {
+        player.vx = player.speed;
+    } else {
+        player.vx = 0;
+    }
+
+    if ((keys["arrowup"] || keys["w"] || keys[" "]) && player.grounded) {
+        player.vy = player.jumpForce;
+        player.grounded = false;
+    }
+
+    player.vy += player.gravity;
+    player.x += player.vx;
+    
+    if (player.x < 0) player.x = 0;
+    if (player.x + player.width > canvas.width) player.x = canvas.width - player.width;
+
+    platforms.forEach(plat => {
+        if (checkCollision(player, plat)) {
+            if (player.vx > 0) player.x = plat.x - player.width;
+            if (player.vx < 0) player.x = plat.x + plat.w;
+        }
+    });
+
+    player.y += player.vy;
+    player.grounded = false;
+
+    platforms.forEach(plat => {
+        if (checkCollision(player, plat)) {
+            if (player.vy > 0) { 
+                player.y = plat.y - player.height;
+                player.vy = 0;
+                player.grounded = true;
+            } else if (player.vy < 0) { 
+                player.y = plat.y + plat.h;
+                player.vy = 0;
+            }
+        }
+    });
+
+    if (player.y > canvas.height) {
+        triggerDeath();
+    }
+
+    spikes.forEach(spike => {
+        if (checkSpikeCollision(player, spike)) {
+            triggerDeath();
+        }
+    });
+
+    if (player.x < goal.x + goal.width &&
+        player.x + player.width > goal.x &&
+        player.y < goal.y + goal.height &&
+        player.y + player.height > goal.y) {
+        gameActive = false;
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        }
+        victoryScreen.style.display = "flex";
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Dibujar Fondo (Cuadrícula adaptada a la nueva escala)
+    ctx.strokeStyle = "#2a2a35";
+    ctx.lineWidth = 1;
+    for(let i = 0; i < canvas.width; i += 51) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, canvas.height); ctx.stroke();
+    }
+    for(let j = 0; j < canvas.height; j += 51) {
+        ctx.beginPath(); ctx.moveTo(0, j); ctx.lineTo(canvas.width, j); ctx.stroke();
+    }
+
+    // Dibujar Plataformas
+    ctx.fillStyle = "#4b4b5e";
+    platforms.forEach(plat => {
+        ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+        ctx.fillStyle = "#6f6f8a";
+        ctx.fillRect(plat.x, plat.y, plat.w, 4);
+        ctx.fillStyle = "#4b4b5e";
+    });
+
+    // Dibujar Pinchos
+    ctx.fillStyle = "#ff6b6b";
+    spikes.forEach(spike => {
+        ctx.beginPath();
+        ctx.moveTo(spike.x1, spike.y1);
+        ctx.lineTo(spike.x2, spike.y2);
+        ctx.lineTo(spike.x3, spike.y3);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#ff4757";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    });
+
+    // Dibujar Meta
+    ctx.fillStyle = goal.color;
+    ctx.fillRect(goal.x, goal.y, goal.width, goal.height);
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = "#ff4757";
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(goal.x + 8, goal.y + 8, 8, 8);
+    ctx.shadowBlur = 0;
+
+    // Marcador en Fullscreen
+    if (document.fullscreenElement) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.fillRect(15, 15, 160, 35);
+        ctx.fillStyle = "#fff";
+        ctx.font = "bold 16px 'Courier New'";
+        ctx.fillText(`Intentos: ${deaths}`, 25, 38);
+    }
+
+    // Partículas de muerte
+    if (isDying) {
+        particles.forEach(p => {
+            ctx.fillStyle = `rgba(0, 210, 211, ${p.alpha})`;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+        });
+    }
+
+    // Jugador
+    if (!isDying) {
+        ctx.save();
+        if (spawnAnimTimer > 0 && Math.floor(spawnAnimTimer / 4) % 2 === 0) {
+            ctx.globalAlpha = 0.3;
+        }
+
+        ctx.fillStyle = player.color;
+        ctx.fillRect(player.x, player.y, player.width, player.height);
+        
+        // Ojos adaptados al nuevo tamaño
+        ctx.fillStyle = "#000";
+        let eyeOffset = player.vx > 0 ? 5 : (player.vx < 0 ? 0 : 2);
+        ctx.fillRect(player.x + 5 + eyeOffset, player.y + 7, 4, 4);
+        ctx.fillRect(player.x + 15 + eyeOffset, player.y + 7, 4, 4);
+        
+        ctx.restore();
+    }
+}
+
+function gameLoop() {
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+
+</body>
+</html>
